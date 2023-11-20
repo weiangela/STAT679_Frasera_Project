@@ -1,0 +1,43 @@
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(sf)
+#read in data and do some clean up
+counties<-read_sf("usacounties.json")
+counties<-counties%>%
+    mutate(STATE = str_replace(STATE, "^0+", ""),  # Remove leading zeros
+         id = paste0(STATE, COUNTY))
+pop<-read_csv("Population-Density By County.csv")
+pop<- pop %>%
+  mutate(id=as.character(`GCT_STUB.target-geo-id2`))
+merge_data<-full_join(counties, pop, by="id")
+merge_data<- merge_data %>%
+  mutate(logpop=log(`Density per square mile of land area`))
+merge_data$`Density per square mile of land area`<-as.numeric(merge_data$`Density per square mile of land area`)
+max(merge_data$`Density per square mile of land area`)
+summary(merge_data$`Density per square mile of land area`)
+subset<-frasera[(frasera$species=="Frasera speciosa" | frasera$species=="Frasera caroliniensis"),]
+subset <- subset[!is.na(subset$species), ]
+ggplot()+
+  geom_sf(data=merge_data,aes(fill=logpop))+
+  geom_point(data=subset,aes(x=decimalLongitude,y=decimalLatitude, color=species), size=0.5, alpha=0.5)+
+  scale_fill_gradient(
+    low="white", 
+    high="darkred", 
+    limits=c(0, max(merge_data$logpop))
+             #max(merge_data$`Density per square mile of land area`))
+    )+
+  coord_sf(xlim=c(-125,-66), ylim=c(24,50), expand=FALSE)+
+  scale_color_manual(values=c("Frasera speciosa"="black", "Frasera caroliniensis"="blue"))+
+  labs(
+    title="Population Density by County vs Frasera species",
+    fill="Log of Population Density",
+    color="Species"
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.x=element_blank(),
+    axis.title.y=element_blank()
+  )
+```
