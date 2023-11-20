@@ -26,7 +26,6 @@ ggplot()+
     low="white", 
     high="darkred", 
     limits=c(0, max(merge_data$logpop))
-             #max(merge_data$`Density per square mile of land area`))
     )+
   coord_sf(xlim=c(-125,-66), ylim=c(24,50), expand=FALSE)+
   scale_color_manual(values=c("Frasera speciosa"="black", "Frasera caroliniensis"="blue"))+
@@ -35,6 +34,7 @@ ggplot()+
     fill="Log of Population Density",
     color="Species"
   )+
+  guides(color=guide_legend(override.aes = list(size=5)))+
   theme_minimal()+
   theme(
     axis.title.x=element_blank(),
