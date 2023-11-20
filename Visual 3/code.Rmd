@@ -4,6 +4,7 @@ library(dplyr)
 library(ggplot2)
 library(sf)
 #read in data and do some clean up
+frasera <- read_csv("frasera_all - frasera_all.csv")
 counties<-read_sf("usacounties.json")
 counties<-counties%>%
     mutate(STATE = str_replace(STATE, "^0+", ""),  # Remove leading zeros
