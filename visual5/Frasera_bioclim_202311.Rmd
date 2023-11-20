@@ -1,0 +1,538 @@
+---
+title: "ancient clim"
+author: "Yushin Wei"
+date: "2023-11-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(knitr)
+#opts_knit$set(root.dir = "~/path/to/project")
+knitr::opts_chunk$set(cache = TRUE,  dev="pdf",# Cache option
+               autodep = TRUE, # Figure out dependencies automatically
+              # fig.pos = "!H", out.extra = "",#prevent figure floating
+               error = TRUE, #allow errors to not stop execution
+              warning = FALSE, message = FALSE)
+#library(alphahull)
+#library(caret)
+library(rJava)
+library(phytools)
+library(CoordinateCleaner)
+library(countrycode)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+#library(ENMTools)
+library(mapdata)
+library(maptools)
+#library(mapview)
+library(dismo)
+library(rnaturalearth)
+#library(rnaturalearthdata)
+#library(rworldmap)
+library(raster)
+library(speciesgeocodeR)
+require(RColorBrewer)
+#library(sdm)
+library(rgdal)
+#library(ttutils)
+#library(rangeBuilder)
+library(rgeos)
+library(sf)
+library(readxl)
+library(phyloclim)
+library(tidyverse)
+#library(stars)
+library(raster)
+library(scales)
+#library(ggtree)
+#library(treeio)
+library(Rphylopars)
+library(ENMeval)
+library(tmap)
+library(sp)
+library(cowplot)
+library(polyCub)
+#library(BioGeoBEARS)
+library(cladoRcpp)
+library(optimx)      
+library(FD)      
+library(snow)     
+library(parallel)
+```
+#54,12, -72, -125
+```{r label="read in, merge, and clean coordinates",include=FALSE}
+mydir<-"C:/wisc/phD"
+
+usa <- map_data("state")
+mexico <- map_data("worldHires", "Mexico")
+canada <- map_data("worldHires", "Canada")
+states <- map_data("state")
+
+#CFP <- readShapePoly(paste(mydir,"Burge_CFP/CFP_GIS.shp",sep="/"))
+#CFP <- fortify(CFP)
+
+ GBIF <- fread("C:/wisc/phD/frasera_all.csv", header=T, na.strings=c("NA","NaN",""))
+ #data cleaning making sure no weird things
+#   GBIF <- GBIF[!grep('TAXON_MATCH_FUZZY',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('TAXON_MATCH_HIGHERRANK',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('PRESUMED_SWAPPED_COORDINATE',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('PRESUMED_NEGATED_LATITUDE',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('PRESUMED_NEGATED_LONGITUDE',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('BASIS_OF_RECORD_INVALID',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('ELEVATION_NON_NUMERIC',   GBIF$issue), ]
+#   GBIF <- GBIF[!grep('PRESUMED_SWAPPED_COORDINATE',   GBIF$issue), ]
+#   GBIF <- subset(GBIF, ! establishmentMeans %in% c("MANAGED"))
+ ##this is the important part
+GBIF <- subset(GBIF, !is.na(GBIF$decimalLatitude)|!is.na(GBIF$decimalLongitude))
+   GBIF <- subset(GBIF, GBIF$decimalLongitude < -72)
+   GBIF <- subset(GBIF, GBIF$decimalLongitude > -125)
+   GBIF <- subset(GBIF, GBIF$decimalLatitude > 12)
+   GBIF <- subset(GBIF, GBIF$decimalLatitude < 54)
+   GBIF <- subset(GBIF, !is.na(GBIF$species))
+   GBIF <- GBIF[,c("species","countryCode","decimalLatitude","decimalLongitude")]
+#   GBIF$source <- "GBIF"
+   GBIF<-data.frame(GBIF) %>% 
+     filter(species != "Frasera carolinensis") %>% 
+     filter(species != "Frasera ackermaniae")
+   merged2 <- GBIF
+  #read.csv(paste(mydir,"data/coos_cleaned.csv",sep="/"))
+## Here I need to get rid of some species
+occurence_stats<-data.frame(table(merged2$species));names(occurence_stats)=c("species","records")
+#i = "Frasera caroliniensis"
+pdf("Appendix1.pdf")
+##This code is working, but I need to trim the lat/long
+for (i in unique(merged2$species)) {
+  subset(merged2, species == i) -> sp_f
+  NAmap <- ggplot() + geom_polygon(data = usa, 
+                                   aes(x=long, y = lat, group = group), 
+                                   fill = "white", 
+                                   color="black") +
+    geom_polygon(data = mexico, aes(x=long, y = lat, group = group), 
+                 fill = "white", color="black") +
+    geom_polygon(data = canada, aes(x=long, y = lat, group = group), 
+                 fill = "white", color="black") +
+    #geom_polygon(data=CFP, aes(long, lat, group = group), 
+    #             colour = alpha("skyblue", 1/2), size = 0.1, fill #='skyblue', alpha = .3)+
+    geom_point(data=sp_f, aes(x=decimalLongitude, y=decimalLatitude), 
+               fill=alpha("black",0.5),color = "black", shape=21, size=.5) +
+    labs(title = paste(i))+
+    coord_fixed(xlim = c(-125, -72),  ylim = c(12, 54), ratio = 1.2)
+  print(NAmap)};
+dev.off()
+
+occurence_stats$species <- paste0("*",occurence_stats$species,"*")
+occurence_stats$records <- format(occurence_stats$records,big.mark=",",scientific=FALSE)
+```
+
+
+```{r label="prepare for niche models",include=FALSE}
+
+cumulative = function(r){
+  r = round(1000000000 * r) # do raster *10^9 and round it to integer
+  v = values(r) # get raster values as vector
+  t = table(v) # get the number of pixels with each value
+  t = data.frame(t) # make a data frame (pixel value, frequency)
+  t$v = as.numeric(as.character(t$v)) # change the pixel values from factor to numeric
+  t$product = t$v * t$Freq # multiply pixel values by their frequencies
+  t$cumsum = cumsum(t$product) # cumsum: sum all pixel values <= than itself
+  t$rescaled = scales::rescale(t$cumsum, to = c(0,1)) # rescale the sum to 0-100
+  r = subs(r, t, by="v", which="rescaled") # reclassify raster
+  return(r)
+}
+##need to drop na
+merged2$species <- gsub(" ","_",merged2$species)
+merged2<-merged2[,c("species","decimalLatitude","decimalLongitude")]
+colnames(merged2) <- c("species","lat","lon")
+coos <- merged2[,c(1,3,2)]
+coos$species <- as.factor(coos$species)
+coos <- na.omit(coos)
+
+#read in predictors
+shape.list <- list.files("C:/wisc/phD/climate files/wc2.1_2.5m_bio",pattern = ".tif", full.names = T)
+#shape.list <- list.files(paste(mydir,"wc2.1_30s_bio/",sep="/"),pattern = ".tif", full.names = T)
+stack <- stack(shape.list)
+
+#soil.shape <- raster(paste(mydir,"HWSD_RASTER/hwsd.bil",sep="/"))
+##
+#crop to desired extent (here, W North America)
+myExpl <- raster::crop(stack, extent(-125, -72, 12, 54))
+myExpl <- stack(myExpl)
+
+#mySoil <- crop(soil.shape, extent(-125, -108, 27, 49))
+
+#extract points for all Salvia and determine correlation of all layers
+Salvia_all_extr <- raster::extract(myExpl, coos[,2:3])
+Salvia_all_extr <- cbind.data.frame(coos,Salvia_all_extr)
+Salvia_all_extr <- data.frame(Salvia_all_extr)
+correlated_layers <- cor(x=Salvia_all_extr[,4:NCOL(Salvia_all_extr)],use="complete.obs")
+#find layers correlated >0.90
+hc = caret::findCorrelation(correlated_layers, cutoff=0.90, exact = T); hc2<-hc+3
+#keep precip and remove all other vars.
+hc2 <- hc2[! hc2 %in% 7]
+hc <- hc[! hc %in% 4]
+#remove correlated variables
+Salvia_all_extr <- Salvia_all_extr[-hc2]
+#remove correlated raster layers
+myExpl <- myExpl[[-hc]]
+
+#Salvia_soil <- raster::extract(mySoil, coos[,2:3])
+
+#save cropped rasters for later
+# dir.create(file.path(getwd(), "predictors_asc/"),showWarnings = FALSE)
+# writeRaster(myExpl,
+#             # a series of names for output files
+#             filename=paste0("predictors_asc/",names(myExpl)),
+#             format="ascii", ## the output format
+#             bylayer=TRUE, ## this will save a series of layers
+#             overwrite=T)
+
+#generate random background/pseudo-absence points
+bg <- randomPoints(mask = myExpl[[1]],n = 2000)
+bg <- data.frame(bg)
+colnames(bg) = c("lon","lat")
+# extracting env conditions for background
+a <- raster::extract(myExpl, bg)
+
+#set up some folders for results
+###remember to comment this line out before next run, or it overwrite
+dir.create(file.path("C:/wisc/phD/maxent_models/"),showWarnings = FALSE)
+dir.create(file.path("C:/wisc/phD/predicted_distributions/"),showWarnings = FALSE)
+##I don't need this
+#set up for species richness figure
+# div_raster <- speciesgeocodeR::RichnessGrid(coos,type = "spnum",reso=0.2)
+# crs(div_raster) <- crs(myExpl[[1]])
+# new.div_raster <- projectRaster(div_raster, myExpl[[1]])
+#new.div_raster <- raster::mask(new.div_raster,myExpl[[1]])
+#myCol <- rev(brewer.pal(n =19, name = "Spectral"))
+```
+
+```{r label="Figure_individual_coo", echo=FALSE, fig.height=10, fig.width=10,fig.align='center',fig.cap="\\label{fig:Figure_individual_coo}Ocurrence maps for each species of \\textit{Salvia} subg. \\textit{Audibertia} in Western North America. The extent of the CFP is outlined in orange."}
+##Plot this coordinates points on map
+plot_list <- list() 
+for (i in unique(merged2$species)) {
+  sp_f <- subset(merged2, species == i) 
+  clean_i<-gsub("_"," ",i)
+  plot_list[[i]] <- ggplot() + geom_polygon(data = usa, 
+                                   aes(x=long, y = lat, group = group), 
+                                   fill = "white", 
+                                   color="black") +
+    geom_polygon(data = mexico, aes(x=long, y = lat, group = group), 
+                 fill = "white", color="black") +
+    geom_polygon(data = canada, aes(x=long, y = lat, group = group), 
+                 fill = "white", color="black") +
+    ##geom_polygon(data=CFP, aes(long, lat, group = group), 
+      #           colour = alpha("orange", 1/2), size = 0.1, fill = 'orange', alpha = .3)+
+    geom_point(data=sp_f, aes(x=lon, y=lat), 
+               fill=alpha("black",0.5),color = "black", shape=21, size=.5) +
+    labs(title = bquote(paste(italic(.(clean_i)))))+xlab("Longitude")+ylab("Latitude")+
+    coord_fixed(xlim = c(-125, -72),  ylim = c(12, 54), ratio = 1.2)+theme(panel.background = element_rect(fill = 'lightblue'))
+}
+marrangeGrob(grobs=plot_list,ncol=2,nrow=2,layout_matrix = matrix(1:4, 2, 2, TRUE))
+```
+
+```{r loop niche models,include=FALSE}
+models_all <- list()
+predictions_all_raw <- list()
+predictions_all_cum <- list()
+retained_points <- list()
+AUC_train <- list()
+AUC_test <- list()
+
+#generate maxent ENMs for each species
+ for(i in levels(coos$species)){
+   
+   coo_i <- data.frame(coos[coos$species == i,])
+   coo_i<-droplevels(coo_i)
+   coordinates(coo_i) <- ~lon + lat
+   
+   #keep only one ocurrence from each raster grid cell
+   cells <- cellFromXY(myExpl[[1]], coo_i)
+   dups <- duplicated(cells)
+   coo_final <-   coo_i[!dups, ]
+   #cat(i,":",nrow(coo_i) - nrow(coo_final), "records removed\n")
+   retained_points <- append(retained_points,length(coo_final))
+   names(retained_points)[which(levels(coos$species)==i)]<-i
+   
+   #carduacea_buff <- buffer(carduacea_final, 4)
+   # crop study area to a manageable extent (rectangle shaped)
+   #studyArea <- crop(myExpl,extent(carduacea_buff))  
+   
+#   # the 'study area' created by extracting the buffer area from the raster stack
+   #studyArea <- mask(studyArea,carduacea_buff)
+   # output will still be a raster stack, just of the study area
+   
+   # save the new study area rasters as ascii
+   #writeRaster(studyArea,
+   #       # a series of names for output files
+   #   filename=paste0("../data/studyarea/",names(studyArea),".asc"), 
+#    format="ascii", ## the output format
+   #    bylayer=TRUE, ## this will save a series of layers
+   #    overwrite=T)
+   
+   set.seed(1)
+   #select 75% for training
+   selected <- sample(1:nrow(coo_final), nrow(coo_final) * 0.75)
+   
+   occ_train <- coo_final[selected, ]  # this is the selection to be sed for model training
+  occ_test <- coo_final[-selected, ]  # this is the opposite of the selection which will be used for model testing
+  
+   # extracting env conditions for training occ from the raster
+   # stack; a data frame is returned (i.e multiple columns)
+  p <- raster::extract(myExpl, occ_train)
+   # env conditions for testing occ
+  p_test <- raster::extract(myExpl, occ_test)
+   
+   pa <- c(rep(1, nrow(p)), rep(0, nrow(a)))
+   pder <- as.data.frame(rbind(p, a))
+   
+   # train Maxent with tabular data
+   mod <- dismo::maxent(x=pder, ## env conditions
+                 p=pa,   ## 1:presence or 0:absence
+                 path=paste("C:/wisc/phD/maxent_models/",i,sep=""), 
+                 #pathmax=paste("C:/wisc/phD/maxent_models/",i,sep=""), ## folder for maxent output; 
+                # if we do not specify a folder R will put the results in a temp file, 
+                 # and it gets messy to read those. . .
+                 args=c("responsecurves") ## parameter specification
+   )
+    models_all <- append(models_all,mod)
+  names(models_all)[which(levels(coos$species)==i)]<-i
+   
+  # using 'training data' to evaluate p & a are dataframe/s
+  # (the p and a are the training presence and background
+  # points)
+   mod_eval_train <- dismo::evaluate(p = p, a = a, model = mod)
+   AUC_train_i <- mod_eval_train@auc
+   
+   AUC_train <- append(AUC_train,AUC_train_i)
+   names(AUC_train)[which(levels(coos$species)==i)]<-i
+   
+   mod_eval_test <- dismo::evaluate(p = p_test, a = a, model = mod)
+   AUC_test_i <- mod_eval_test@auc
+   
+   AUC_test <- append(AUC_test,AUC_test_i)
+   names(AUC_test)[which(levels(coos$species)==i)]<-i
+   
+     # predict model to raster area
+   pred <- predict(mod, myExpl,args=c("outputformat=raw")) 
+   
+   predictions_all_raw <- append(predictions_all_raw,pred)
+   names(predictions_all_raw)[which(levels(coos$species)==i)] <- i
+   
+   writeRaster(pred,
+               # a series of names for output files
+               filename=paste("C:/wisc/phD/predicted_distributions/",i,".ac",sep=""), 
+               format="ascii", ## the output format
+               bylayer=TRUE, ## this will save a series of layers
+               overwrite=T)
+   
+   clean_i<-gsub("_"," ",i)
+   
+   pred <- cumulative(pred) # Running cumulative() on the predicted raster layer will return a new raster layer with cumulative output, ranging from 0 to 1.
+   
+   predictions_all_cum <- append(predictions_all_cum,pred)
+   names(predictions_all_cum)[which(levels(coos$species)==i)] <- i
+   
+   path <- paste("C:/wisc/phD/predicted_distributions",sep="")
+   pdf(file = file.path(path, paste0(i,"_PredictPresent.pdf",sep="")))
+   #par(mar=c(2,2,2,2))
+   plot(pred, 1, cex=0.5, legend=T, main=bquote(paste(italic(.(clean_i)),". Predicted, present day.")))
+ points(coo_final,cex=.25,pch=16)
+  dev.off()
+ }
+save(models_all,predictions_all_raw,predictions_all_cum,retained_points,AUC_train,AUC_test, file = "maxent_models.Rdata")
+
+```
+
+```{r loop niche models,include=FALSE}
+#Start from here with saved Rdata
+#load(paste(mydir,"/data/maxent_models.Rdata",sep=""))
+
+ENM_tab <- data.frame(do.call("cbind", list(table(merged2$species), retained_points, lapply(AUC_train,round,4), lapply(AUC_test,round,4))))
+colnames(ENM_tab)<-c("*n*-all","*n*-thinned","AUC-train","AUC-test")
+rownames(ENM_tab)<-paste0("*",rownames(ENM_tab),"*")
+rownames(ENM_tab)<-gsub("_"," ",rownames(ENM_tab))
+ENM_tab$`*n*-all`<-format(ENM_tab$`*n*-all`,big.mark=",",scientific=FALSE)
+ENM_tab$`*n*-thinned`<-format(ENM_tab$`*n*-thinned`,big.mark=",",scientific=FALSE)
+```
+
+```{r label="Figure_individual_ENMs", echo=FALSE, fig.height=10, fig.width=10,fig.align='center',fig.cap="\\label{fig:Figure_individual_ENMs}Predicted distribution for each species of \\textit{Salvia} subg. \\textit{Audibertia} based on our Maxent ENMs. Deeper green shading indicates a higher probability of occurence in a given area. Points show known ocurrences."}
+plot_list <- list()
+par(mfrow=c(2,2))
+for (k in 1:length(predictions_all_cum)) {
+  sp_k <- names(predictions_all_cum)[k]
+  coo_plot <- data.frame(coos[coos$species == sp_k, ])
+  clean_k <- gsub("_", " ", unique(coo_plot$species))
+
+  # Create a plot
+plot(
+    predictions_all_cum[[k]], 1, legend = TRUE, horizontal = FALSE,
+    main = bquote(paste(italic(.(clean_k)))),
+    xlab = "Longitude", ylab = "Latitude", cex.lab = 1,
+    axes = TRUE, cex.main = 1.75, cex.axis = 1, legend.width = 1.5,
+    legend.args = list(text = '', side = 4, font = 2, line = 2, cex = 1),
+    axis.args = list(cex.axis = 1)
+  )
+  
+  # Add points to the plot
+  points(coo_plot[2:3], cex = 0.25, pch = 16, col = alpha("black", 0.7))
+
+}
+```
+```{r}
+ gbif_values <- raster::extract(predictions_all_cum[[k]], GBIF[, c("decimalLongitude", "decimalLatitude")])
+temp_species_gbif = filter(merged2, species == k)
+# Combine extracted values with GBIF data
+gbif_data <- cbind(GBIF, value = gbif_values)
+
+# Plot using ggplot2
+p <- ggplot(gbif_data) +  
+  geom_tile(aes(x = decimalLongitude, y = decimalLatitude, fill = factor(value), alpha = 0.8)) + 
+  geom_polygon(data = usa, aes(x = long, y = lat, group = group), fill = "white", color = "black") #+
+  geom_point(data = temp_species_gbif, aes(x = long, y = lat), fill = alpha("black", 0.5), color = "black", shape = 21, size = 0.5) +
+  coord_fixed(xlim = c(-125, -72), ylim = c(12, 54), ratio = 1.2)
+```
+
+
+```{r}
+folder_list <- list.dirs("C:/wisc/phD/paleoclims/")
+folder_list <- folder_list[c(4,2,7,3,6,5)]
+shape_list_all = list()
+for (folder in folder_list){
+  temp_list <- list.files(folder,pattern = "\\.tif$", full.names = T)
+  stack.130 <- stack(temp_list)
+  names(stack.130)<-paste0("wc2.1_2.5m_",names(stack.130))
+# names(myExpl2)<-gsub("wc2.1_2.5m_","",names(myExpl2))
+ stack.130<-stack.130[[names(myExpl)]]
+ 
+ myExpl.130 <- raster::crop(stack.130, extent(-125, -72, 12, 54)) #%>% 
+#stack(myExpl.130)
+ 
+ pred.130_list<-list()
+ for (i in 1:length(models_all)){
+   mod_i<-models_all[[i]]
+    pred.130 <- predict(mod_i, myExpl.130,args=c("outputformat=raw")) 
+   pred.130 <- cumulative(pred.130)
+   pred.130_list<-append(pred.130_list,pred.130)
+ }
+
+ names(models_all)->names(pred.130_list)
+  shape_list_all <- c(shape_list_all, list(pred.130_list))
+}
+#shape_list_all <- shape_list_all[c(8,9,10,11,12,13)]
+shape_list_all[[7]] <- predictions_all_cum
+#save(shape_list_all, folder_list, file = "maxent_models_historical17tocurrent.Rdata")
+
+for (i in 1:length(shape_list_all)){
+  filename=paste0("C:/Users/75180/679visualization/grouppj/maxent/",i,".png")
+  png(filename, width = 1000, height = 1000)
+  par(mfrow = c(4, 4), mar = c(1, 1, 2, 1.5))
+  for (k in 1:length(shape_list_all[[i]])) {
+  sp_k_5 <- names(shape_list_all[[i]])[k]
+  coo_plot_5 <- data.frame(coos[coos$species == sp_k_5,])
+  clean_k_5 <- gsub("_", " ", unique(coo_plot_5$species))
+
+  # Plot with adjusted label and title sizes
+  plot(
+    shape_list_all[[i]][[k]], 1, legend = TRUE, horizontal = FALSE,
+    main = bquote(paste(italic(.(clean_k_5)))),xaxt ="n",yaxt = "n",
+    axes = TRUE, cex.main = 1,  # Adjust the size of the main title
+    cex.axis = 0.8,  # Adjust the size of tick labels
+    legend.width = 1.5,
+    legend.args = list(text = '', side = 2, font = 2, line = 2, cex = 0.8),  # Adjust the size of legend text
+    axis.args = list(cex.axis = 0.8)
+  )
+
+  # Add points to the plot
+  points(coo_plot_5[2:3], cex = 0.25, pch = 16, col = alpha("black", 0.7))
+}
+
+# Close the PDF device after the loop
+dev.off()
+}
+
+```
+
+```{r}
+library(shiny)
+
+ui <- fluidPage(
+  titlePanel("genus Frasera historical distribution modeling"),
+  sliderInput("kyr", "thousands years ago", min = -18, max = 0, value = 0, step = 3),
+  imageOutput("Distribution"),
+  textOutput("name")
+)
+
+server <- function(input, output) {
+  output$name <- renderText({
+    paste0("C:/Users/75180/679visualization/grouppj/maxent/", (input$kyr + 18) / 3 + 1, ".png")
+  })
+
+  output$Distribution <- renderImage({
+    filename <- normalizePath(file.path(paste0("C:/Users/75180/679visualization/grouppj/maxent/", (input$kyr + 18) / 3 + 1, ".png")))
+    list(src = filename, alt = "/")
+  }, deleteFile = FALSE)
+}
+
+shinyApp(ui, server)
+
+```
+
+
+```{r}
+#shiny
+library(shiny)
+ui <- fluidPage(
+  titlePanel("genus Frasera historical distribution modeling"),
+  sliderInput("kyr", "thousands years ago", min=-18, max = 0, value = 0, step = 3),
+  imageOutput("Distribution")
+  #textOutput("name")
+)
+# server <- function(input, output) {
+#   output$name <- reactive(paste0("C:/Users/75180/679visualization/grouppj/maxent/",(input$kyr+18)/3+1,".png"))}
+server <- function(input, output) {
+  output$Distribution <- renderImage({
+    filenameshiny <- paste0("C:/Users/75180/679visualization/grouppj/maxent/",(input$kyr+18)/3+1,".png")
+    readPNG(filenameshiny())
+  })
+}
+
+app <- shinyApp(ui, server)
+```
+
+
+backup
+```{r}
+ shape.list.130 <- list.files("C:/wisc/phD/paleoclim5m",pattern = "\\.tif$", full.names = T)
+ stack.130 <- stack(shape.list.130)
+ names(stack.130)<-paste0("wc2.1_2.5m_",names(stack.130))
+# names(myExpl2)<-gsub("wc2.1_2.5m_","",names(myExpl2))
+ stack.130<-stack.130[[names(myExpl)]]
+ 
+ myExpl.130 <- raster::crop(stack.130, extent(-125, -72, 12, 54)) #%>% 
+#stack(myExpl.130)
+ 
+ pred.130_list<-list()
+ for (i in 1:length(models_all)){
+   mod_i<-models_all[[i]]
+    pred.130 <- predict(mod_i, myExpl.130,args=c("outputformat=raw")) 
+   pred.130 <- cumulative(pred.130)
+   pred.130_list<-append(pred.130_list,pred.130)
+ }
+
+ names(models_all)->names(pred.130_list)
+ 
+ par(mfrow=c(2,2))
+for(k in 1:length(pred.130_list)){
+  sp_k_5 <- names(pred.130_list)[k]
+  coo_plot_5 <- data.frame(coos[coos$species == sp_k_5,])
+  clean_k_5<-gsub("_"," ",unique(coo_plot_5$species))
+  plot(pred.130_list[[k]], 1, legend=T,horizontal = F, main=bquote(paste(italic(.(clean_k_5)))),xlab="Longitude",ylab="Latitude",cex.lab=1,
+       axes=T,cex.main=1.75,cex.axis = 1,legend.width = 1.5,
+  legend.args=list(text='', side=4, font=2, line=2, cex=1),axis.args = list(cex.axis = 1)#,smallplot=c(0.14,0.17, 0.125,0.5)
+  )
+  points(coo_plot_5[2:3],cex=.25,pch=16,col=alpha("black", 0.7))
+}
+```
