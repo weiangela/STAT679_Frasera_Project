@@ -1,0 +1,75 @@
+
+```{r}
+library(shiny)
+library(sf)
+library(leaflet)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+
+#read in frasera data and population by county data
+frasera <- read_csv("frasera_all - frasera_all.csv")
+counties <- read_sf("usacounties.json")
+pop <- read_csv("Population-Density By County.csv")
+
+
+#data cleaning
+counties <- counties %>%
+  mutate(
+    STATE = str_replace(STATE, "^0+", ""),
+    id = paste0(STATE, COUNTY)
+  )
+
+pop <- pop %>%
+  mutate(id = as.character(`GCT_STUB.target-geo-id2`))
+
+merge_data <- full_join(counties, pop, by = "id") %>%
+  mutate(logpop = log(`Density per square mile of land area`))
+
+subset <- frasera[(frasera$species == "Frasera speciosa" | frasera$species == "Frasera caroliniensis"), ]
+subset <- subset[!is.na(subset$species), ]
+subset$species <- as.factor(subset$species)
+subset <- subset[complete.cases(subset$decimalLatitude, subset$decimalLongitude), ]
+qpal <- colorQuantile("YlOrRd", merge_data$logpop, n = 5)
+qpal_colors <- unique(qpal(sort(merge_data$logpop))) 
+
+
+ui <- fluidPage(
+  leafletOutput("map")
+)
+
+server <- function(input, output) {
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = merge_data, 
+                  fillColor = ~qpal(merge_data$logpop), 
+                  fillOpacity = 0.7,
+                  color = "white",
+                  weight = 1) %>%
+      addCircleMarkers(data = subset, 
+                       lng = ~decimalLongitude, 
+                       lat = ~decimalLatitude, 
+                       radius = 2, 
+                       color = ~ifelse(species == "Frasera caroliniensis", "#2EAFD1", "black"),
+                       fillOpacity = 0.6)%>%
+      setView(lng = -95, lat = 37, zoom = 4) %>%
+      addLegend(position = "bottomleft", 
+                colors = c("#2EAFD1", "black"), 
+                labels = c("Frasera caroliniensis", "Frasera speciosa"), 
+                title = "Species",
+                opacity = 0.7)%>%  
+      addLegend(position = "bottomright",
+                colors = qpal_colors, 
+                labels = c("Very Low","Low","Medium","High","Very high"), 
+                opacity = 0.7,
+                title = "Population Density")
+      
+              
+})}
+
+
+
+
+shinyApp(ui, server)
+```
