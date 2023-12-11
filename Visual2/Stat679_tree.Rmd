@@ -1,0 +1,77 @@
+---
+title: "STAT679_Tree"
+author: "Sreeja Kodati"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ape)
+
+tree_string <- "(((Gentina_Puberulenta, Gentina_Lawrencei), ((Swertia_Decora, ((Swertia_Verticillifolia,Swertia_Tashiroi), Pterygocalyx_Volubilis)), ((((Swertia_Perennis,((((Lomatogonium_rotatum,((Swertia_Japonica,Gentianella_Turkestanorum), (Swertia_racemosa,Gentianella_azurea))))))))), ((Swertia_bimaculata),((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana,Frasera_albicaulis_subsp.nitida), (Frasera_albicaulis_var.modocensis,Frasera_albicaulis)))))))))));"
+
+tree <- read.tree(text = tree_string)
+
+tree$tip.label <- gsub("'", "", tree$tip.label)
+
+pdf("phylogenetic_tree.pdf", width = 10, height = 10)
+
+plot(tree)
+
+dev.off()
+```
+
+```{r}
+frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana))))));"
+
+frasera <- read.tree(text = frasera_string)
+frasera$tip.label <- gsub("'","", frasera$tip.label)
+pdf("frasera_tree.pdf", width = 10, height = 10)
+
+plot(frasera)
+dev.off()
+
+```
+
+```{r}
+library(shiny)
+library(ape)
+
+frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana,Frasera_albicaulis_subsp.nitida), (Frasera_albicaulis_var.modocensis,Frasera_albicaulis))))));"
+
+frasera <- read.tree(text = frasera_string)
+
+ui <- basicPage(
+  plotOutput("plot1", brush = "plot_brush"),
+  textOutput("selected_species")
+)
+
+server <- function(input, output) {
+  
+  output$plot1 <- renderPlot({
+    plot(frasera)
+  })
+
+  output$selected_species <- renderText({
+    plotinfo <- get("last_plot.phylo", envir = .PlotPhyloEnv)
+    tips_xy <- data.frame(Tip = frasera$tip.label, 
+                          xvar = plotinfo$xx[1:Ntip(frasera)], 
+                          yvar = plotinfo$yy[1:Ntip(frasera)])
+    
+    brushed_points <- brushedPoints(tips_xy, input$plot_brush, xvar = "xvar", yvar = "yvar")
+    if (nrow(brushed_points) > 0) {
+      selected_species <- brushed_points$Tip
+      paste("Selected Species: ", paste(selected_species, collapse = ", "))
+    } else {
+      "No species selected"
+    }
+  })
+
+}
+shinyApp(ui, server)
+```
+
