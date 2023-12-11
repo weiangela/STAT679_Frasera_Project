@@ -26,9 +26,10 @@ dev.off()
 ```
 
 ```{r}
+library(ape)
 #frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana,Frasera_albicaulis_subsp.nitida), (Frasera_albicaulis_var.modocensis,Frasera_albicaulis))))));"
 
-frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana))))));"
+frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana, Frasera_albicaulis))))));"
 
 frasera <- read.tree(text = frasera_string)
 frasera$tip.label <- gsub("'","", frasera$tip.label)
@@ -42,7 +43,7 @@ dev.off()
 library(shiny)
 library(ape)
 
-frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana,Frasera_albicaulis_subsp.nitida), (Frasera_albicaulis_var.modocensis,Frasera_albicaulis))))));"
+frasera_string <- "((Frasera_speciosa, (Frasera_fastigiata,Frasera_caroliniensis)), (((Frasera_parryi,Frasera_paniculata), Frasera_albomarginata), (Frasera_tubulosa, (Frasera_puberulenta, ((Frasera_montana, Frasera_albicaulis))))));"
 
 frasera <- read.tree(text = frasera_string)
 
